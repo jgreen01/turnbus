@@ -4,6 +4,6 @@ node_modules/
 *.sqlite-shm
 *.sqlite-wal
 *.token
-*.lock
+daemon.lock
 agy-creds.json
 .DS_Store

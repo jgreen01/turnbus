@@ -336,14 +336,6 @@
 
   <script>
     function resolveUiToken() {
-      const embedded = "__TURNBUS_UI_TOKEN__";
-      if (embedded && embedded !== "__TURNBUS_UI_TOKEN__") {
-        try {
-          localStorage.setItem("turnbus_ui_token", embedded);
-          sessionStorage.setItem("turnbus_ui_token", embedded);
-        } catch {}
-        return embedded;
-      }
       const hash = window.location.hash.replace(/^#/, "");
       if (hash) {
         const hashParams = new URLSearchParams(hash.includes("=") ? hash : "token=" + hash);

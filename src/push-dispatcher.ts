@@ -1,4 +1,4 @@
-import { ClaimedDelivery, TurnBusDB } from './db.ts'
+import { AttemptOutcome, ClaimedDelivery, TurnBusDB } from './db.ts'
 import { canonicalizePath, isSameOrSubpath, RosterManager } from './roster.ts'
 import { AgyCommandRunner, deliverToAgyConversation } from './adapters/agy.ts'
 import { ClaudeAdapterSender, deliverToClaudeChannel } from './adapters/claude.ts'
@@ -171,52 +171,73 @@ export class PushDispatcher {
     return processedCount
   }
 
+  private holdInInbox(item: ClaimedDelivery, stage: string, retryDelayMs: number, error?: string): void {
+    this.deps.db.completeDeliveryAttempt({
+      deliveryId: item.delivery.id,
+      claimToken: item.claimToken,
+      outcome: 'definitely_not_accepted',
+      stage,
+      error: error ?? null,
+      retryDelayMs,
+    })
+  }
+
+  private finishAttempt(
+    item: ClaimedDelivery,
+    recipientId: string,
+    res: {
+      outcome: Exclude<AttemptOutcome, 'in_progress'>
+      stage: string
+      receipt?: Record<string, unknown>
+      error?: string
+    }
+  ): void {
+    this.deps.db.completeDeliveryAttempt({
+      deliveryId: item.delivery.id,
+      claimToken: item.claimToken,
+      outcome: res.outcome,
+      stage: res.stage,
+      nativeReceipt: res.receipt,
+      error: res.error ?? null,
+      retryDelayMs: res.outcome === 'definitely_not_accepted' ? 15_000 : null,
+    })
+    this.deps.onDeliveryStateChange?.(
+      item.delivery.id,
+      item.message.id,
+      recipientId,
+      res.outcome === 'accepted' ? 'pushed' : res.outcome === 'unknown' ? 'unknown' : 'queued'
+    )
+  }
+
   private async dispatchOne(item: ClaimedDelivery): Promise<void> {
     if (this.paused) {
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: 'definitely_not_accepted',
-        stage: 'dispatcher_paused',
-        error: 'Push dispatcher is paused; message held in inbox',
-        retryDelayMs: 15_000,
-      })
+      this.holdInInbox(item, 'dispatcher_paused', 15_000, 'Push dispatcher is paused; message held in inbox')
       return
     }
 
     const agent = this.deps.db.getAgent(item.delivery.recipient_id)
     if (!agent || agent.tool === 'user') {
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: 'definitely_not_accepted',
-        stage: 'no_push_for_user',
-        retryDelayMs: 60_000,
-      })
+      this.holdInInbox(item, 'no_push_for_user', 60_000)
       return
     }
 
     if (this.exceedsAgentReplyChainDepth(item.message.id)) {
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: 'definitely_not_accepted',
-        stage: 'agent_chain_depth_exceeded',
-        error: `Agent-only reply chain depth exceeded max (${this.deps.maxAgentReplyDepth ?? 10}); held in inbox`,
-        retryDelayMs: 60_000,
-      })
+      this.holdInInbox(
+        item,
+        'agent_chain_depth_exceeded',
+        60_000,
+        `Agent-only reply chain depth exceeded max (${this.deps.maxAgentReplyDepth ?? 10}); held in inbox`
+      )
       return
     }
 
     if (!this.checkAndRecordWakeBudget(agent.id)) {
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: 'definitely_not_accepted',
-        stage: 'wake_rate_limited',
-        error: `Wake rate limit exceeded for '${agent.id}' (>${this.deps.maxWakesPerMinute ?? 15} wakes/min); held in inbox`,
-        retryDelayMs: 30_000,
-      })
+      this.holdInInbox(
+        item,
+        'wake_rate_limited',
+        30_000,
+        `Wake rate limit exceeded for '${agent.id}' (>${this.deps.maxWakesPerMinute ?? 15} wakes/min); held in inbox`
+      )
       return
     }
 
@@ -226,21 +247,7 @@ export class PushDispatcher {
         message: item.message,
         sendViaAdapterWs: this.deps.sendViaClaudeAdapterWs,
       })
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: res.outcome,
-        stage: res.stage,
-        nativeReceipt: res.receipt,
-        error: res.error ?? null,
-        retryDelayMs: res.outcome === 'definitely_not_accepted' ? 15_000 : null,
-      })
-      this.deps.onDeliveryStateChange?.(
-        item.delivery.id,
-        item.message.id,
-        agent.id,
-        res.outcome === 'accepted' ? 'pushed' : res.outcome === 'unknown' ? 'unknown' : 'queued'
-      )
+      this.finishAttempt(item, agent.id, res)
       return
     }
 
@@ -253,14 +260,12 @@ export class PushDispatcher {
           latestSession.native_session_id !== item.session.native_session_id ||
           latestSession.generation !== item.session.generation)
       ) {
-        this.deps.db.completeDeliveryAttempt({
-          deliveryId: item.delivery.id,
-          claimToken: item.claimToken,
-          outcome: 'definitely_not_accepted',
-          stage: 'session_superseded_before_send',
-          error: `Codex agent '${agent.id}' rebound to a newer session before send started`,
-          retryDelayMs: 0,
-        })
+        this.holdInInbox(
+          item,
+          'session_superseded_before_send',
+          0,
+          `Codex agent '${agent.id}' rebound to a newer session before send started`
+        )
         return
       }
 
@@ -270,14 +275,12 @@ export class PushDispatcher {
         session = this.deps.db.getCurrentSession(agent.id)
       }
       if (!session || !session.native_session_id) {
-        this.deps.db.completeDeliveryAttempt({
-          deliveryId: item.delivery.id,
-          claimToken: item.claimToken,
-          outcome: 'definitely_not_accepted',
-          stage: 'codex_unbound',
-          error: `Codex agent '${agent.id}' has no bound loaded thread; message held in durable inbox`,
-          retryDelayMs: 15_000,
-        })
+        this.holdInInbox(
+          item,
+          'codex_unbound',
+          15_000,
+          `Codex agent '${agent.id}' has no bound loaded thread; message held in durable inbox`
+        )
         return
       }
 
@@ -294,22 +297,7 @@ export class PushDispatcher {
           })
         },
       })
-
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: res.outcome,
-        stage: res.stage,
-        nativeReceipt: res.receipt,
-        error: res.error ?? null,
-        retryDelayMs: res.outcome === 'definitely_not_accepted' ? 15_000 : null,
-      })
-      this.deps.onDeliveryStateChange?.(
-        item.delivery.id,
-        item.message.id,
-        agent.id,
-        res.outcome === 'accepted' ? 'pushed' : res.outcome === 'unknown' ? 'unknown' : 'queued'
-      )
+      this.finishAttempt(item, agent.id, res)
       return
     }
 
@@ -321,14 +309,12 @@ export class PushDispatcher {
         creds?.conversationId &&
         creds.conversationId !== currentSession.native_session_id
       ) {
-        this.deps.db.completeDeliveryAttempt({
-          deliveryId: item.delivery.id,
-          claimToken: item.claimToken,
-          outcome: 'definitely_not_accepted',
-          stage: 'agy_credential_session_mismatch',
-          error: `Antigravity credentials conversationId (${creds.conversationId}) does not match bound session (${currentSession.native_session_id})`,
-          retryDelayMs: 15_000,
-        })
+        this.holdInInbox(
+          item,
+          'agy_credential_session_mismatch',
+          15_000,
+          `Antigravity credentials conversationId (${creds.conversationId}) does not match bound session (${currentSession.native_session_id})`
+        )
         return
       }
       const res = await deliverToAgyConversation({
@@ -336,21 +322,7 @@ export class PushDispatcher {
         message: item.message,
         runner: this.deps.agyRunner,
       })
-      this.deps.db.completeDeliveryAttempt({
-        deliveryId: item.delivery.id,
-        claimToken: item.claimToken,
-        outcome: res.outcome,
-        stage: res.stage,
-        nativeReceipt: res.receipt,
-        error: res.error ?? null,
-        retryDelayMs: res.outcome === 'definitely_not_accepted' ? 15_000 : null,
-      })
-      this.deps.onDeliveryStateChange?.(
-        item.delivery.id,
-        item.message.id,
-        agent.id,
-        res.outcome === 'accepted' ? 'pushed' : res.outcome === 'unknown' ? 'unknown' : 'queued'
-      )
+      this.finishAttempt(item, agent.id, res)
     }
   }
 }

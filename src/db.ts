@@ -32,6 +32,7 @@ export interface AgentSessionRecord {
   capabilities: string
   push_config: string
   connection_epoch: string | null
+  session_token_hash: string | null
   last_seen_at: number
   lease_expires_at: number
 }
@@ -169,6 +170,7 @@ export class TurnBusDB {
         capabilities TEXT NOT NULL DEFAULT '{}',
         push_config TEXT NOT NULL DEFAULT '{}',
         connection_epoch TEXT,
+        session_token_hash TEXT,
         last_seen_at INTEGER NOT NULL,
         lease_expires_at INTEGER NOT NULL,
         UNIQUE(endpoint_key, native_session_id)
@@ -287,6 +289,10 @@ export class TurnBusDB {
       CREATE INDEX IF NOT EXISTS idx_reply_waits_fanout
         ON reply_waits(fanout_id, status);
     `)
+
+    try {
+      this.db.exec(`ALTER TABLE agent_sessions ADD COLUMN session_token_hash TEXT`)
+    } catch {}
 
     // Always ensure the human 'user' operator handle exists
     const now = Date.now()
@@ -436,7 +442,7 @@ export class TurnBusDB {
     members?: Array<{ agentId: string; wakeMode?: WakeMode }>
     reconcileMembers?: boolean
     now?: number
-  }): { id: string; description: string; members: Array<{ agent_id: string; wake_mode: WakeMode }> } {
+  }) {
     const chanId = normalizeChannelId(params.id)
     const now = params.now ?? Date.now()
     const tx = this.db.transaction(() => {
@@ -569,6 +575,7 @@ export class TurnBusDB {
     capabilities?: Record<string, unknown>
     pushConfig?: Record<string, unknown>
     connectionEpoch?: string | null
+    sessionTokenHash?: string | null
     allowRebind?: boolean
     leaseMs?: number
     now?: number
@@ -622,6 +629,7 @@ export class TurnBusDB {
               capabilities = ?,
               push_config = ?,
               connection_epoch = COALESCE(?, connection_epoch),
+              session_token_hash = COALESCE(?, session_token_hash),
               last_seen_at = ?,
               lease_expires_at = ?
           WHERE id = ?
@@ -634,6 +642,7 @@ export class TurnBusDB {
           capabilitiesJson,
           pushConfigJson,
           params.connectionEpoch ?? null,
+          params.sessionTokenHash ?? null,
           now,
           leaseExpiresAt,
           currentForHandle.id
@@ -667,6 +676,7 @@ export class TurnBusDB {
               capabilities = ?,
               push_config = ?,
               connection_epoch = ?,
+              session_token_hash = COALESCE(?, session_token_hash),
               last_seen_at = ?,
               lease_expires_at = ?
           WHERE id = ?
@@ -679,6 +689,7 @@ export class TurnBusDB {
           capabilitiesJson,
           pushConfigJson,
           params.connectionEpoch ?? null,
+          params.sessionTokenHash ?? null,
           now,
           leaseExpiresAt,
           existingByNative.id
@@ -695,8 +706,8 @@ export class TurnBusDB {
         INSERT INTO agent_sessions (
           id, agent_id, endpoint_key, native_session_id, generation, is_current,
           workspace, pid, process_started_at, native_status, capabilities, push_config,
-          connection_epoch, last_seen_at, lease_expires_at
-        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          connection_epoch, session_token_hash, last_seen_at, lease_expires_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         sessionId,
         agentId,
@@ -710,6 +721,7 @@ export class TurnBusDB {
         capabilitiesJson,
         pushConfigJson,
         params.connectionEpoch ?? null,
+        params.sessionTokenHash ?? null,
         now,
         leaseExpiresAt
       )
@@ -719,6 +731,21 @@ export class TurnBusDB {
     })
 
     return tx()
+  }
+
+  setSessionTokenHash(agentId: string, tokenHash: string | null): void {
+    this.db
+      .query(`UPDATE agent_sessions SET session_token_hash = ? WHERE agent_id = ? AND is_current = 1`)
+      .run(tokenHash, agentId.toLowerCase())
+  }
+
+  findCurrentSessionByTokenHash(tokenHash: string, now = Date.now()): AgentSessionRecord | null {
+    const row = this.db
+      .query(
+        `SELECT * FROM agent_sessions WHERE session_token_hash = ? AND is_current = 1 AND lease_expires_at > ? LIMIT 1`
+      )
+      .get(tokenHash, now) as AgentSessionRecord | null
+    return row ?? null
   }
 
   getCurrentSession(agentId: string, now = Date.now()): AgentSessionRecord | null {

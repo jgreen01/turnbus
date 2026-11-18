@@ -166,7 +166,7 @@ export async function startTurnBusMcpServer(customConfig?: Partial<AdapterRuntim
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
     })
-    const json = await res.json().catch(() => ({}))
+    const json = (await res.json().catch(() => ({}))) as any
     if (!res.ok) {
       if (!retried && res.status === 403 && path !== '/api/agents/register' && sessionToken) {
         sessionToken = null

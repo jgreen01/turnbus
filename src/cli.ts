@@ -47,7 +47,7 @@ async function main() {
     caller?: string,
     useUiToken = true,
     timeoutMs = 15_000
-  ) {
+  ): Promise<any> {
     const includeSessionToken = Boolean(sessionToken && (!caller || caller === registeredAgentId))
     const res = await fetch(`${daemonUrl}${path}`, {
       method,
@@ -68,7 +68,7 @@ async function main() {
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
     })
-    const data = await res.json().catch(() => ({}))
+    const data = (await res.json().catch(() => ({}))) as any
     if (!res.ok) {
       console.error(`Error (${res.status}): ${data?.error || res.statusText}`)
       process.exit(1)

@@ -9,6 +9,8 @@ export interface BusAuthConfig {
   uiToken: string
 }
 
+export const MIN_TOKEN_LENGTH = 32
+
 export function getDefaultStateDir(): string {
   return process.env.TURNBUS_STATE_DIR ?? join(homedir(), '.local', 'share', 'turnbus')
 }
@@ -23,11 +25,20 @@ export function ensureStateDir(stateDir = getDefaultStateDir()): string {
   return stateDir
 }
 
+function validateEnvToken(raw: string | undefined, envName: string): string | null {
+  if (raw === undefined) return null
+  const trimmed = raw.trim()
+  if (trimmed.length < MIN_TOKEN_LENGTH) {
+    throw new Error(`${envName} must be at least ${MIN_TOKEN_LENGTH} characters long`)
+  }
+  return trimmed
+}
+
 function loadOrCreateToken(filePath: string): string {
   if (existsSync(filePath)) {
     try {
       const existing = readFileSync(filePath, 'utf-8').trim()
-      if (existing.length >= 32) {
+      if (existing.length >= MIN_TOKEN_LENGTH) {
         try { chmodSync(filePath, 0o600) } catch {}
         return existing
       }
@@ -41,7 +52,7 @@ function loadOrCreateToken(filePath: string): string {
   } catch {
     try {
       const raced = readFileSync(filePath, 'utf-8').trim()
-      if (raced.length >= 32) return raced
+      if (raced.length >= MIN_TOKEN_LENGTH) return raced
     } catch {}
     writeFileSync(filePath, token + '\n', { mode: 0o600 })
     try { chmodSync(filePath, 0o600) } catch {}
@@ -51,18 +62,35 @@ function loadOrCreateToken(filePath: string): string {
 
 export function initBusAuth(stateDir = getDefaultStateDir()): BusAuthConfig {
   ensureStateDir(stateDir)
-  const agentToken = process.env.TURNBUS_TOKEN ?? loadOrCreateToken(join(stateDir, 'agent.token'))
-  const uiToken = process.env.TURNBUS_UI_TOKEN ?? loadOrCreateToken(join(stateDir, 'ui.token'))
+  const agentToken =
+    validateEnvToken(process.env.TURNBUS_TOKEN, 'TURNBUS_TOKEN') ??
+    loadOrCreateToken(join(stateDir, 'agent.token'))
+  const uiToken =
+    validateEnvToken(process.env.TURNBUS_UI_TOKEN, 'TURNBUS_UI_TOKEN') ??
+    loadOrCreateToken(join(stateDir, 'ui.token'))
   return { stateDir, agentToken, uiToken }
 }
 
 export function readAgentToken(stateDir = getDefaultStateDir()): string {
-  if (process.env.TURNBUS_TOKEN) return process.env.TURNBUS_TOKEN
+  const envTok = validateEnvToken(process.env.TURNBUS_TOKEN, 'TURNBUS_TOKEN')
+  if (envTok) return envTok
   const tokenPath = join(stateDir, 'agent.token')
   if (existsSync(tokenPath)) {
-    return readFileSync(tokenPath, 'utf-8').trim()
+    const fileTok = readFileSync(tokenPath, 'utf-8').trim()
+    if (fileTok.length >= MIN_TOKEN_LENGTH) return fileTok
   }
   return initBusAuth(stateDir).agentToken
+}
+
+export function readUiToken(stateDir = getDefaultStateDir()): string {
+  const envTok = validateEnvToken(process.env.TURNBUS_UI_TOKEN, 'TURNBUS_UI_TOKEN')
+  if (envTok) return envTok
+  const tokenPath = join(stateDir, 'ui.token')
+  if (existsSync(tokenPath)) {
+    const fileTok = readFileSync(tokenPath, 'utf-8').trim()
+    if (fileTok.length >= MIN_TOKEN_LENGTH) return fileTok
+  }
+  return initBusAuth(stateDir).uiToken
 }
 
 export function safeTokenEquals(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -79,7 +107,7 @@ export function validateLoopbackHostAndOrigin(req: Request, expectedPort?: numbe
     return { ok: false, reason: 'Missing Host header' }
   }
   const allowedHosts = expectedPort
-    ? new Set([`127.0.0.1:${expectedPort}`, `localhost:${expectedPort}`])
+    ? new Set([`127.0.0.1:${expectedPort}`, `localhost:${expectedPort}`, `[::1]:${expectedPort}`])
     : new Set([host.toLowerCase()])
   if (expectedPort && !allowedHosts.has(host.toLowerCase())) {
     return { ok: false, reason: `Disallowed Host header: ${host}` }
@@ -94,7 +122,11 @@ export function validateLoopbackHostAndOrigin(req: Request, expectedPort?: numbe
   if (origin !== null) {
     try {
       const url = new URL(origin)
-      const isLoopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+      const isLoopback =
+        url.hostname === '127.0.0.1' ||
+        url.hostname === 'localhost' ||
+        url.hostname === '[::1]' ||
+        url.hostname === '::1'
       const portMatches = !expectedPort || url.port === String(expectedPort)
       if (!isLoopback || !portMatches || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
         return { ok: false, reason: `Cross-origin request rejected: ${origin}` }
@@ -109,11 +141,13 @@ export function validateLoopbackHostAndOrigin(req: Request, expectedPort?: numbe
 
 export type AuthRole = 'agent' | 'ui' | 'none'
 
-export function authenticateRequest(req: Request, auth: BusAuthConfig, expectedPort?: number): {
+export interface AuthResult {
   ok: boolean
   role: AuthRole
   reason?: string
-} {
+}
+
+export function authenticateRequest(req: Request, auth: BusAuthConfig, expectedPort?: number): AuthResult {
   const hostCheck = validateLoopbackHostAndOrigin(req, expectedPort)
   if (!hostCheck.ok) {
     return { ok: false, role: 'none', reason: hostCheck.reason }
