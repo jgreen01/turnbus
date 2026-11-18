@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>turnbus — Multi-Agent Console</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --claude: #d2a8ff;
+      --codex: #3fb950;
+      --agy: #79c0ff;
+      --user: #f0883e;
+      --danger: #f85149;
+      --warn: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 310px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .brand {
+      padding: 16px;
+      font-size: 16px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .conn-pill {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #238636;
+      color: #fff;
+      font-weight: 600;
+    }
+    .conn-pill.disconnected { background: var(--danger); }
+    .sec-header {
+      padding: 12px 16px 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sec-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .mini-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .mini-btn:hover { color: var(--text); border-color: var(--accent); }
+    .nav-item {
+      padding: 8px 16px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      border-left: 3px solid transparent;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.04); }
+    .nav-item.active {
+      background: rgba(88, 166, 255, 0.1);
+      border-left-color: var(--accent);
+    }
+    .nav-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .nav-sub {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .tool-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .tool-claude { background: rgba(210,168,255,0.15); color: var(--claude); }
+    .tool-codex { background: rgba(63,185,80,0.15); color: var(--codex); }
+    .tool-agy { background: rgba(121,192,255,0.15); color: var(--agy); }
+    .unread-badge {
+      background: var(--accent);
+      color: #000;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .topbar {
+      padding: 12px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .topbar-title { font-size: 15px; font-weight: 700; }
+    .topbar-sub { font-size: 12px; color: var(--muted); }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toggle-btn {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .toggle-btn.active {
+      border-color: #238636;
+      color: var(--codex);
+    }
+    .toggle-btn.warn {
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+    .stream {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .msg-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .msg-route {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+    .msg-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .msg-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text);
+    }
+    .status-pill {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .status-acked { color: var(--codex); border-color: #238636; }
+    .status-pushed { color: var(--accent); border-color: #1f6feb; }
+    .status-queued { color: var(--muted); }
+    .status-unknown { color: var(--warn); border-color: var(--warn); }
+    .status-failed { color: var(--danger); border-color: var(--danger); }
+    .composer {
+      padding: 12px 20px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .composer-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      flex-wrap: wrap;
+    }
+    .fanout-targets {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 4px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    select, textarea, button.send-btn {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: inherit;
+    }
+    select { padding: 5px 10px; font-size: 12px; }
+    .composer-row { display: flex; gap: 10px; }
+    textarea {
+      flex: 1;
+      min-height: 54px;
+      max-height: 160px;
+      padding: 8px 12px;
+      font-size: 13px;
+      resize: vertical;
+    }
+    button.send-btn {
+      background: #238636;
+      border-color: #2ea043;
+      color: #fff;
+      font-weight: 600;
+      padding: 0 18px;
+      cursor: pointer;
+    }
+    button.send-btn:hover { background: #2ea043; }
+    .reply-pill {
+      font-size: 11px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .clear-reply { cursor: pointer; color: var(--danger); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span>turnbus</span>
+      <span id="connPill" class="conn-pill">connecting</span>
+    </div>
+    <div class="sec-header"><span class="sec-title">Stream Filter</span></div>
+    <div id="filterAll" class="nav-item active">
+      <div class="nav-row"><span>All Activity (Firehose)</span></div>
+      <div class="nav-sub">All DMs, fan-outs &amp; channels</div>
+    </div>
+    <div class="sec-header">
+      <span class="sec-title">Agents (DMs)</span>
+    </div>
+    <div id="agentList"></div>
+    <div class="sec-header">
+      <span class="sec-title">Channels (Group)</span>
+      <button id="newChannelBtn" class="mini-btn" title="Create channel">+ Channel</button>
+    </div>
+    <div id="channelList"></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div id="viewTitle" class="topbar-title">All Activity (Firehose)</div>
+        <div id="viewSub" class="topbar-sub">Showing all direct, fan-out, and channel messages</div>
+      </div>
+      <div class="topbar-actions">
+        <button id="autoScrollBtn" class="toggle-btn active" title="Toggle automatic scroll to bottom">Auto-scroll: ON</button>
+        <button id="pauseBtn" class="toggle-btn active" title="Pause or unpause native agent push wakeups">Pushes: Active</button>
+      </div>
+    </header>
+
+    <section id="stream" class="stream"></section>
+
+    <footer class="composer">
+      <div class="composer-controls">
+        <label for="targetSelect">Send as <strong>Operator (user)</strong> to:</label>
+        <select id="targetSelect"></select>
+        <div id="fanoutBox" class="fanout-targets"></div>
+        <div id="replyBanner" class="reply-pill" style="display:none;">
+          <span id="replyText"></span>
+          <span id="clearReply" class="clear-reply" title="Clear reply_to">&times;</span>
+        </div>
+      </div>
+      <div class="composer-row">
+        <textarea id="msgInput" placeholder="Write a message... (Ctrl+Enter or Cmd+Enter to send)"></textarea>
+        <button id="sendBtn" class="send-btn">Send</button>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    function resolveUiToken() {
+      const embedded = "__TURNBUS_UI_TOKEN__";
+      if (embedded && embedded !== "__TURNBUS_UI_TOKEN__") {
+        try {
+          localStorage.setItem("turnbus_ui_token", embedded);
+          sessionStorage.setItem("turnbus_ui_token", embedded);
+        } catch {}
+        return embedded;
+      }
+      const hash = window.location.hash.replace(/^#/, "");
+      if (hash) {
+        const hashParams = new URLSearchParams(hash.includes("=") ? hash : "token=" + hash);
+        const hTok = hashParams.get("token");
+        if (hTok && hTok.length >= 16) {
+          try {
+            localStorage.setItem("turnbus_ui_token", hTok);
+            sessionStorage.setItem("turnbus_ui_token", hTok);
+            history.replaceState(null, "", window.location.pathname + window.location.search);
+          } catch {}
+          return hTok;
+        }
+      }
+      try {
+        const stored = localStorage.getItem("turnbus_ui_token") || sessionStorage.getItem("turnbus_ui_token");
+        if (stored) return stored;
+      } catch {}
+      const entered = window.prompt("Enter turnbus UI token (run `turnbus ui` in terminal to get URL):");
+      if (entered && entered.trim()) {
+        try {
+          localStorage.setItem("turnbus_ui_token", entered.trim());
+          sessionStorage.setItem("turnbus_ui_token", entered.trim());
+        } catch {}
+        return entered.trim();
+      }
+      return "";
+    }
+
+    const UI_TOKEN = resolveUiToken();
+    let state = {
+      paused: false,
+      agents: [],
+      channels: [],
+      messages: [],
+      filterType: "all",
+      filterId: null,
+      replyToId: null,
+      autoScroll: true,
+      lastRenderedSeq: -1,
+    };
+
+    const connPill = document.getElementById("connPill");
+    const agentListEl = document.getElementById("agentList");
+    const channelListEl = document.getElementById("channelList");
+    const streamEl = document.getElementById("stream");
+    const targetSelectEl = document.getElementById("targetSelect");
+    const fanoutBoxEl = document.getElementById("fanoutBox");
+    const viewTitleEl = document.getElementById("viewTitle");
+    const viewSubEl = document.getElementById("viewSub");
+    const msgInputEl = document.getElementById("msgInput");
+    const sendBtnEl = document.getElementById("sendBtn");
+    const replyBannerEl = document.getElementById("replyBanner");
+    const replyTextEl = document.getElementById("replyText");
+    const clearReplyEl = document.getElementById("clearReply");
+    const filterAllEl = document.getElementById("filterAll");
+    const autoScrollBtnEl = document.getElementById("autoScrollBtn");
+    const pauseBtnEl = document.getElementById("pauseBtn");
+    const newChannelBtnEl = document.getElementById("newChannelBtn");
+
+    async function apiFetch(path, opts = {}) {
+      const headers = Object.assign({}, opts.headers || {}, {
+        "x-turnbus-ui-token": UI_TOKEN,
+        "Content-Type": "application/json",
+      });
+      const res = await fetch(path, Object.assign({}, opts, { headers }));
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || res.statusText);
+      }
+      return res.json();
+    }
+
+    function updateAutoScrollButton() {
+      if (state.autoScroll) {
+        autoScrollBtnEl.textContent = "Auto-scroll: ON";
+        autoScrollBtnEl.className = "toggle-btn active";
+      } else {
+        autoScrollBtnEl.textContent = "Auto-scroll: OFF (Jump \u2193)";
+        autoScrollBtnEl.className = "toggle-btn warn";
+      }
+    }
+
+    function updatePauseButton() {
+      if (state.paused) {
+        pauseBtnEl.textContent = "Pushes: PAUSED";
+        pauseBtnEl.className = "toggle-btn warn";
+      } else {
+        pauseBtnEl.textContent = "Pushes: Active";
+        pauseBtnEl.className = "toggle-btn active";
+      }
+    }
+
+    // Automatically pause auto-scroll when the user scrolls up manually
+    streamEl.addEventListener("scroll", () => {
+      const distanceFromBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight;
+      if (distanceFromBottom > 65 && state.autoScroll) {
+        state.autoScroll = false;
+        updateAutoScrollButton();
+      } else if (distanceFromBottom <= 15 && !state.autoScroll) {
+        state.autoScroll = true;
+        updateAutoScrollButton();
+      }
+    });
+
+    autoScrollBtnEl.addEventListener("click", () => {
+      state.autoScroll = !state.autoScroll;
+      updateAutoScrollButton();
+      if (state.autoScroll) {
+        streamEl.scrollTop = streamEl.scrollHeight;
+      }
+    });
+
+    pauseBtnEl.addEventListener("click", async () => {
+      try {
+        const res = await apiFetch("/api/ui/pause", {
+          method: "POST",
+          body: JSON.stringify({ paused: !state.paused }),
+        });
+        state.paused = Boolean(res.paused);
+        updatePauseButton();
+      } catch (err) {
+        alert("Failed to toggle pause: " + (err.message || err));
+      }
+    });
+
+    newChannelBtnEl.addEventListener("click", async () => {
+      const name = window.prompt("New channel name (e.g. #backend):");
+      if (!name || !name.trim()) return;
+      try {
+        await apiFetch("/api/channels/create", {
+          method: "POST",
+          body: JSON.stringify({ channel: name.trim() }),
+        });
+        await refreshState();
+      } catch (err) {
+        alert("Failed to create channel: " + (err.message || err));
+      }
+    });
+
+    function setFilter(type, id) {
+      state.filterType = type;
+      state.filterId = id;
+      state.lastRenderedSeq = -1;
+      filterAllEl.className = "nav-item" + (type === "all" ? " active" : "");
+      if (type === "all") {
+        viewTitleEl.textContent = "All Activity (Firehose)";
+        viewSubEl.textContent = "Showing all direct, fan-out, and channel messages";
+      } else if (type === "agent") {
+        viewTitleEl.textContent = "Conversation with " + id;
+        viewSubEl.textContent = "Showing DMs and fan-outs involving " + id;
+        targetSelectEl.value = "dm:" + id;
+        fanoutBoxEl.style.display = "none";
+      } else if (type === "channel") {
+        viewTitleEl.textContent = "Channel " + id;
+        viewSubEl.textContent = "Group channel messages";
+        targetSelectEl.value = "channel:" + id;
+        fanoutBoxEl.style.display = "none";
+      }
+      renderSidebar();
+      renderStream(true);
+    }
+
+    filterAllEl.addEventListener("click", () => setFilter("all", null));
+
+    targetSelectEl.addEventListener("change", () => {
+      fanoutBoxEl.style.display = targetSelectEl.value === "fanout" ? "flex" : "none";
+    });
+
+    function renderSidebar() {
+      agentListEl.textContent = "";
+      for (const a of state.agents) {
+        if (a.id === "user") continue;
+        const item = document.createElement("div");
+        item.className = "nav-item" + (state.filterType === "agent" && state.filterId === a.id ? " active" : "");
+        item.addEventListener("click", () => setFilter("agent", a.id));
+
+        const row = document.createElement("div");
+        row.className = "nav-row";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = a.displayName + " (" + a.id + ")";
+        row.appendChild(nameSpan);
+
+        const rightDiv = document.createElement("div");
+        rightDiv.style.display = "flex";
+        rightDiv.style.gap = "4px";
+        rightDiv.style.alignItems = "center";
+
+        if (a.unreadCount > 0) {
+          const ub = document.createElement("span");
+          ub.className = "unread-badge";
+          ub.textContent = String(a.unreadCount);
+          rightDiv.appendChild(ub);
+        }
+
+        const tb = document.createElement("span");
+        tb.className = "tool-badge tool-" + a.tool;
+        tb.textContent = a.tool;
+        rightDiv.appendChild(tb);
+        row.appendChild(rightDiv);
+
+        const sub = document.createElement("div");
+        sub.className = "nav-sub";
+        const statusSpan = document.createElement("span");
+        statusSpan.textContent = [
+          a.bound ? "bound" : "unbound",
+          a.nativeStatus || "offline",
+          "push:" + (a.pushCapability || "none"),
+        ].join(" \u00b7 ");
+        sub.appendChild(statusSpan);
+
+        const renameBtn = document.createElement("button");
+        renameBtn.className = "mini-btn";
+        renameBtn.textContent = "Rename";
+        renameBtn.addEventListener("click", async ev => {
+          ev.stopPropagation();
+          const newHandle = window.prompt("New handle for " + a.id + ":", a.id);
+          if (!newHandle || !newHandle.trim()) return;
+          const newDisplay = window.prompt("Display name:", a.displayName) || newHandle.trim();
+          try {
+            await apiFetch("/api/agents/rename", {
+              method: "POST",
+              body: JSON.stringify({
+                old_handle: a.id,
+                new_handle: newHandle.trim(),
+                display_name: newDisplay.trim(),
+                set_workspace_default: true,
+              }),
+            });
+            await refreshState();
+          } catch (err) {
+            alert("Rename failed: " + (err.message || err));
+          }
+        });
+        sub.appendChild(renameBtn);
+
+        item.appendChild(row);
+        item.appendChild(sub);
+        agentListEl.appendChild(item);
+      }
+
+      channelListEl.textContent = "";
+      for (const c of state.channels) {
+        const item = document.createElement("div");
+        item.className = "nav-item" + (state.filterType === "channel" && state.filterId === c.id ? " active" : "");
+        item.addEventListener("click", () => setFilter("channel", c.id));
+
+        const row = document.createElement("div");
+        row.className = "nav-row";
+        row.textContent = c.id;
+
+        const sub = document.createElement("div");
+        sub.className = "nav-sub";
+        sub.textContent = "Members: " + (c.members || []).join(", ");
+
+        item.appendChild(row);
+        item.appendChild(sub);
+        channelListEl.appendChild(item);
+      }
+
+      const prevVal = targetSelectEl.value;
+      targetSelectEl.textContent = "";
+      for (const a of state.agents) {
+        if (a.id === "user") continue;
+        const opt = document.createElement("option");
+        opt.value = "dm:" + a.id;
+        opt.textContent = "DM -> " + a.displayName + " (" + a.id + " \u00b7 " + a.tool + ")";
+        targetSelectEl.appendChild(opt);
+      }
+      for (const c of state.channels) {
+        const opt = document.createElement("option");
+        opt.value = "channel:" + c.id;
+        opt.textContent = "Channel " + c.id;
+        targetSelectEl.appendChild(opt);
+      }
+      const fanOpt = document.createElement("option");
+      fanOpt.value = "fanout";
+      fanOpt.textContent = "Fan-Out (Multiple Agents)";
+      targetSelectEl.appendChild(fanOpt);
+
+      if (prevVal && Array.from(targetSelectEl.options).some(o => o.value === prevVal)) {
+        targetSelectEl.value = prevVal;
+      }
+
+      // Render fan-out checkboxes while preserving checked state
+      const checkedSet = new Set(
+        Array.from(fanoutBoxEl.querySelectorAll("input[type=checkbox]:checked")).map(el => el.value)
+      );
+      fanoutBoxEl.textContent = "";
+      for (const a of state.agents) {
+        if (a.id === "user") continue;
+        const lbl = document.createElement("label");
+        lbl.style.display = "flex";
+        lbl.style.alignItems = "center";
+        lbl.style.gap = "4px";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = a.id;
+        if (checkedSet.has(a.id)) cb.checked = true;
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(a.id));
+        fanoutBoxEl.appendChild(lbl);
+      }
+    }
+
+    function renderStream(forceScrollIfEnabled = false) {
+      const prevScrollTop = streamEl.scrollTop;
+      streamEl.textContent = "";
+      const filtered = state.messages.filter(m => {
+        if (state.filterType === "all") return true;
+        if (state.filterType === "agent") {
+          return m.sender_id === state.filterId || m.recipient_id === state.filterId;
+        }
+        if (state.filterType === "channel") {
+          return m.channel_id === state.filterId;
+        }
+        return true;
+      });
+
+      let maxSeq = state.lastRenderedSeq;
+      for (const m of filtered) {
+        if (typeof m.seq === "number" && m.seq > maxSeq) maxSeq = m.seq;
+        const card = document.createElement("div");
+        card.className = "msg-card";
+
+        const head = document.createElement("div");
+        head.className = "msg-head";
+
+        const route = document.createElement("div");
+        route.className = "msg-route";
+        const fromSpan = document.createElement("span");
+        fromSpan.textContent = m.sender_id;
+        const arrowSpan = document.createElement("span");
+        arrowSpan.style.color = "var(--muted)";
+        arrowSpan.textContent = m.fanout_id ? "\u21c9" : "\u2192";
+        const toSpan = document.createElement("span");
+        toSpan.textContent = m.channel_id || m.recipient_id || "?";
+        route.appendChild(fromSpan);
+        route.appendChild(arrowSpan);
+        route.appendChild(toSpan);
+
+        const meta = document.createElement("div");
+        meta.className = "msg-meta";
+        const idSpan = document.createElement("span");
+        idSpan.textContent = "#" + String(m.id).slice(0, 8);
+        meta.appendChild(idSpan);
+
+        if (m.fanout_id) {
+          const fanSpan = document.createElement("span");
+          fanSpan.textContent = "fanout:#" + String(m.fanout_id).slice(0, 6);
+          meta.appendChild(fanSpan);
+        }
+
+        if (m.reply_to_id) {
+          const repSpan = document.createElement("span");
+          repSpan.textContent = "\u21aa #" + String(m.reply_to_id).slice(0, 8);
+          meta.appendChild(repSpan);
+        }
+
+        if (Array.isArray(m.deliveries)) {
+          for (const d of m.deliveries) {
+            const pill = document.createElement("span");
+            pill.className = "status-pill status-" + d.status;
+            pill.textContent = d.recipient_id + ":" + d.status;
+            if (d.last_error) pill.title = d.last_error;
+            meta.appendChild(pill);
+          }
+        }
+
+        const timeSpan = document.createElement("span");
+        timeSpan.textContent = new Date(m.created_at).toLocaleTimeString();
+        meta.appendChild(timeSpan);
+
+        const replyBtn = document.createElement("button");
+        replyBtn.className = "mini-btn";
+        replyBtn.textContent = "Reply";
+        replyBtn.addEventListener("click", () => {
+          state.replyToId = m.id;
+          replyTextEl.textContent = "Replying to #" + String(m.id).slice(0, 8) + " (" + m.sender_id + ")";
+          replyBannerEl.style.display = "flex";
+          if (m.channel_id) {
+            targetSelectEl.value = "channel:" + m.channel_id;
+          } else {
+            const targetAgent = m.sender_id === "user" ? m.recipient_id : m.sender_id;
+            if (targetAgent) targetSelectEl.value = "dm:" + targetAgent;
+          }
+          fanoutBoxEl.style.display = "none";
+          msgInputEl.focus();
+        });
+        meta.appendChild(replyBtn);
+
+        head.appendChild(route);
+        head.appendChild(meta);
+
+        const body = document.createElement("div");
+        body.className = "msg-body";
+        body.textContent = m.body;
+
+        card.appendChild(head);
+        card.appendChild(body);
+        streamEl.appendChild(card);
+      }
+
+      const hasNewMessages = maxSeq > state.lastRenderedSeq;
+      state.lastRenderedSeq = maxSeq;
+
+      if (state.autoScroll && (hasNewMessages || forceScrollIfEnabled)) {
+        streamEl.scrollTop = streamEl.scrollHeight;
+      } else {
+        streamEl.scrollTop = prevScrollTop;
+      }
+    }
+
+    clearReplyEl.addEventListener("click", () => {
+      state.replyToId = null;
+      replyBannerEl.style.display = "none";
+    });
+
+    async function sendMessageFromUi() {
+      const text = msgInputEl.value.trim();
+      if (!text) return;
+      const targetVal = targetSelectEl.value;
+      if (!targetVal) return;
+
+      sendBtnEl.disabled = true;
+      try {
+        if (targetVal === "fanout") {
+          const targets = Array.from(fanoutBoxEl.querySelectorAll("input[type=checkbox]:checked")).map(el => el.value);
+          if (targets.length === 0) {
+            alert("Select at least one recipient handle for fan-out.");
+            return;
+          }
+          await apiFetch("/api/messages/fanout", {
+            method: "POST",
+            body: JSON.stringify({ to: targets, message: text }),
+          });
+        } else if (targetVal.startsWith("channel:")) {
+          const channel = targetVal.slice("channel:".length);
+          await apiFetch("/api/channels/post", {
+            method: "POST",
+            body: JSON.stringify({
+              channel,
+              message: text,
+              reply_to_id: state.replyToId || undefined,
+            }),
+          });
+        } else {
+          const to = targetVal.slice("dm:".length);
+          await apiFetch("/api/messages/send", {
+            method: "POST",
+            body: JSON.stringify({
+              to,
+              message: text,
+              reply_to_id: state.replyToId || undefined,
+            }),
+          });
+        }
+        msgInputEl.value = "";
+        state.replyToId = null;
+        replyBannerEl.style.display = "none";
+        await refreshState();
+      } catch (err) {
+        alert("Send failed: " + (err.message || err));
+      } finally {
+        sendBtnEl.disabled = false;
+      }
+    }
+
+    sendBtnEl.addEventListener("click", sendMessageFromUi);
+    msgInputEl.addEventListener("keydown", e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        sendMessageFromUi();
+      }
+    });
+
+    async function refreshState() {
+      try {
+        const data = await apiFetch("/api/ui/state");
+        state.paused = Boolean(data.paused);
+        state.agents = data.agents || [];
+        state.channels = data.channels || [];
+        state.messages = data.messages || [];
+        updatePauseButton();
+        renderSidebar();
+        renderStream(false);
+      } catch (err) {
+        console.error("Failed to refresh UI state:", err);
+      }
+    }
+
+    function connectWs() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(proto + "//" + location.host + "/ws");
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ type: "auth_ui", token: UI_TOKEN }));
+      });
+      ws.addEventListener("message", ev => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "auth_ok") {
+            connPill.textContent = "connected";
+            connPill.className = "conn-pill";
+            refreshState();
+          } else if (msg.type === "state_changed") {
+            refreshState();
+          }
+        } catch {}
+      });
+      ws.addEventListener("close", () => {
+        connPill.textContent = "reconnecting";
+        connPill.className = "conn-pill disconnected";
+        setTimeout(connectWs, 2000);
+      });
+    }
+
+    updateAutoScrollButton();
+    refreshState();
+    connectWs();
+  </script>
+</body>
+</html>
